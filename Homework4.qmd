@@ -1,0 +1,247 @@
+---
+title: "ST558 - Homework 4: Hodge podging with purrr"
+authors: Laraib Azmat
+date: June 20, 2024
+format: html
+---
+
+```{r}
+library(httr)
+library(jsonlite)
+library(tidyverse)
+```
+
+
+### Task 1: Conceptual Questions
+
+1.    What is the purpose of the `lapply()` function? What is the equivalent `purrr` function?
+ - `lapply()` applies a given function to a list  
+
+2.    Suppose we have a list called my_list. Each element of the list is a numeric data frame (all columns are numeric). We want use `lapply()` to run the code cor(numeric_matrix, method = "kendall") on each element of the list. Write code to do this below! (I’m really trying to ask you how you specify `method = "kendall"` when calling `lapply()`). 
+
+  -   `lapply(X = my_list, FUN = function(x) {cor(x, method = "kendall")})`
+  
+3.    What are two advantages of using `purrr` functions instead of the BaseR apply family?
+
+  -   Type stable functions and first argument is always the data 
+  
+4.    What is a side-effect function?
+
+  -   Does something other than return a value 
+  
+5.    Why can you name a variable `sd` in a function and not cause any issues with the `sd` function?
+
+  -   The function exists in a different namespace than the variable 
+  
+
+### Task 2: Writing R Functions
+```{r}
+#setting up trial data to test function
+set.seed(5)
+n <- 50
+x <- runif(n)
+response <- 2 + 10*x + rnorm(n)
+predict <- predict(lm(response ~ x), data.frame(x))
+```
+
+```{r}
+#running basic computation for RMSE that I will later put into the function, also getting an idea of the value
+sqrt(mean((response - predict)^2))
+```
+
+```{r}
+#creating a function to run the RMSE computation
+getRMSE <- function(x, y, ...){
+  stat <- sqrt(mean((x - y)^2, ...))
+  return(stat = stat)
+}
+```
+
+```{r}
+#testing the function
+getRMSE(response, predict)
+```
+
+```{r}
+#creating objects from task 1, #2
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp2 <- 3 + 10*x + rnorm(n)
+pred2 <- predict(lm(resp2 ~ x), data.frame(x))
+```
+
+```{r}
+#finding the correct results first 
+sqrt(mean((resp2 - pred2)^2))
+```
+
+```{r}
+#running the RMSE function and comparing it to previous results
+getRMSE(resp2, pred2)
+```
+```{r}
+#adding NA values to the data 
+resp2[55:56] <- NA_real_
+
+#running RMSE function without specifying NA values
+getRMSE(resp2, pred2)
+
+#testing the additional arguments by specifying the NA values 
+getRMSE(resp2, pred2, na.rm = TRUE)
+```
+
+
+```{r}
+#repeating computation step with MAE 
+abs(mean(response - predict))
+```
+
+```{r}
+#creating a function for MAE
+getMAE <- function(x, y, ...){
+  stat <- abs(mean(x - y, ...))
+  return(stat)
+}
+```
+
+```{r}
+#testing the function
+getMAE(response, predict)
+```
+
+```{r}
+#Task 2, #4 data
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp4 <- 3 + 10*x + rnorm(n)
+pred4 <- predict(lm(resp4 ~ x), data.frame(x))
+```
+
+```{r}
+#finding the correct results first 
+abs(mean(resp4 - pred4))
+```
+
+```{r}
+#running the MAE function 
+getMAE(resp4, pred4)
+```
+```{r}
+#adding NA values to the data 
+resp4[42:43] <- NA_real_
+
+#running the MAE function without specifying NA values
+getMAE(resp4, pred4)
+
+#testing the additional arguments by specifying the NA values 
+getMAE(resp4, pred4, na.rm = TRUE)
+```
+
+```{r}
+stat_wrapper <- function(x, y, ...){
+  if(!(is.vector(x) & is.atomic(x) & is.numeric(x))){
+    stop("Response variable is invalid")
+  }
+  if(!(is.vector(y) & is.atomic(y) & is.numeric(y))){
+    stop("Predictor variable is invalid")
+  }
+  Stats <- list()
+  Stats$RMSE <- getRMSE(x, y, ...)
+  Stats$MAE <- getMAE(x, y, ...)
+  return(Stats)
+}
+```
+
+```{r}
+#Task 2, #6 data
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp6 <- 3 + 10*x + rnorm(n)
+pred6 <- predict(lm(resp6 ~ x), data.frame(x))
+```
+
+```{r}
+#running base functions to get the correct values
+getRMSE(resp6, pred6)
+getMAE(resp6, pred6)
+```
+
+```{r}
+#running the wrapper function 
+stat_wrapper(resp6, pred6)
+```
+
+```{r}
+#adding NA values to the data
+resp6[22:23] <- NA_real_
+
+#running the wrapper function without specifying NA values
+stat_wrapper(resp6, pred6)
+
+#testing the additional arguments by specifying the NA values 
+stat_wrapper(resp6, pred6, na.rm = TRUE)
+```
+
+```{r error=TRUE}
+#testing with incorrect data type 
+stat_wrapper(iris)
+```
+
+### Task 3: Querying an API and a Tidy-Style Function
+
+```{r}
+#adding hidden api key file
+api_key <- source("api_key.R")
+```
+
+```{r}
+#grabbing some articles using personal API key
+bio_api <- httr::GET("https://newsapi.org/v2/everything?q=biofuel", 
+                     add_headers(Authorization = (api_key$value)))
+```
+
+```{r}
+#parsing the API info
+bio_parsed <- bio_api$content |>
+  rawToChar() |>
+  fromJSON()
+str(bio_parsed, max.level = 1)
+```
+
+```{r}
+#turning the dataframe into a tibble 
+bio_info <- bio_parsed$articles |>
+  as_tibble()
+bio_info
+```
+
+```{r}
+news_articles <- function(subject, time_frame_start, time_frame_end, key = api_key$value){
+  URL <- paste("https://newsapi.org/v2/everything?",
+               subject,
+               "&from=",
+               time_frame_start,
+               "&to=",
+               time_frame_end,
+               "&language=en&apiKey=", 
+               key, 
+               sep = "")
+  temp_api <- GET(URL)
+  
+  temp_parse <- temp_api$content |>
+    rawToChar() |>
+    fromJSON() |>
+    as_tibble()
+  return(temp_parse)
+}
+```
+
+```{r}
+news_articles("biofuel", "2024-06-29", "2024-01-01")
+news_articles("apple", "2024-06-29", "2024-01-01")
+```
+
+  -   I am not sure why the request isn't working in this case. 
